@@ -1,0 +1,342 @@
+---
+title: 'CMM535 Coursework PART 2 '
+author: "SAMUEL ONEKUTU 2114194, School of Computing, Robert Gordon University Aberdeen"
+date: "4/20/2022"
+output:
+  html_document: 
+    theme: cerulean
+    fig_width: 4
+    fig_height: 4
+  pdf_document: default
+  word_document: default
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+## Modeling, Experiments, Evaluation and Deployment
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+##### Importing neccessary libraries 
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(ggplot2)  # for generating plots
+library(corrplot) # plot Correlogram
+library(caret)    # wrapping library for training and testing
+library(randomForest)# to loading Random Forest classifier
+library(leaps)    # for "forward" "backward" and "mixed" feature selection
+library(MASS)     # for Feature Transformation
+```
+
+
+##### Importing CSV Files
+
+ Importing the data set and creating a copy from the original 
+```{r}
+escapesClean = read.csv("escapesClean.csv",stringsAsFactors = T)
+escapes <- escapesClean  # creating copy
+summary(escapesClean)
+```
+##### Feature Evalution and Selection
+
+I will began by evaluating the Distribution of some Numeric features and then proceed to selecting the best features against Targets; **Number** and **Cause**.
+
+
+**Basic Observations**
+
+1. "Season" has 4 category levels
+2. "Species" has  Salmon as the modal class
+3. "Age" is numerical
+4. "cause" imbalance two classes
+5. "producing" two classes too
+
+**Distribution Observations**
+
+I would start by analysis the distribution of the target Variable **Number**.
+```{r}
+ggplot(data= escapes, aes(x=Number)) + geom_histogram()
+shapiro.test(escapes$Number)
+```
+seeing that the target is skewed it can be expected that some of the predictors/features too will be skewed
+```{r fig.height=2, fig.width=2}
+ggplot(data= escapes, aes(x=Age)) + geom_histogram()
+shapiro.test(escapes$Age)
+```
+the Age is not normal 
+4. "Average.weight"
+```{r fig.height=2, fig.width=2}
+ggplot(data= escapes, aes(x=Average.Weight)) + geom_histogram()
+shapiro.test(escapes$Average.Weight)
+```
+**Test of other numeric variables**
+```{r}
+#ggplot(data= escapes, aes(x=Org)) + geom_histogram()
+shapiro.test(escapes$Org)
+shapiro.test(escapes$SLR)
+shapiro.test(escapes$Zn)
+shapiro.test(escapes$Cu)
+shapiro.test(escapes$P)
+shapiro.test(escapes$N)
+```
+Though Nitrogen "N" is normal with p-value = 0.1339, all other features("SLR","Zn","Cu","P"and "Org") have abnormal or skewed distributions and generally no major outlier Values
+the target 'Number' is also not normally distributed 
+
+
+##### Looking at all the features together and Selections
+
+I will begin by examining the correlation of the features with each variable against target(**Number**) and with each other in the Correlation plot below.
+
+```{r}
+corr= cor(escapes[c(5,3,4,8,9,10,11,12,13)])   # manually selected numerical variable 
+corrplot(corr)
+```
+correlation plot 
+
+##### Changing Categorical Varables to Numerics
+
+creating copy of one-hot encoded dataframe in order to utilize categorical features (though this is automatically handle but for simplifying model and visualization)
+
+```{r}
+escapes1 <- escapes  # copy
+escapes1$Cause <- as.numeric(escapes1$Cause)-1  #binary class conversion 0== Human and 1==Natural
+escapes1$Producing <- abs(as.numeric(escapes1$Producing)-2) #binary class conversion 1== Yes and 0==No
+dummy<- dummyVars("~.",data=escapes1)  # creating dummy variable
+
+# Creating New copy with Dummyvariables R for Visualization purposes also 
+escapesD <- data.frame(predict(dummy, newdata = escapes1)) 
+
+```
+**'Cause' to Numeric**
+note:
+for Causes 0== Human and 1==Natural.
+also for Producing 1== Yes and 0==No
+another correlation plot with categorical variables 
+```{r fig.height=5, fig.width=5}
+corr= cor(escapesD)   # selecting numerical variable 
+corrplot(corr)
+```
+correlation plot
+
+##### Feature selection using Leaps package
+
+SLR appears to be a very good predictor having a good correlation with Number but a little correlated with the other predictors.
+
+i will be trying the Exhaustive search only because our variables are not too many.
+```{r}
+fullSearch = regsubsets(Number ~ .,data = escapesD,method = "exhaustive", nvmax = 12)   # 12predictors
+full = summary(fullSearch)
+```
+
+Adjusted R-squared by "number of variable"
+```{r}
+plot(full$adjr2, ylab = "adjusted R2", xlab = "Number of variables",col = "blue")
+
+```
+Feature selection Number
+
+The variable appear to plateau at about 6 Variables at the elbow, i will select top 6 also because of my Shiny App specifications.
+
+below are the six relevant features
+```{r}
+top6=full$which[6,-c(1)] # selected variables at top 6(role6) excluding intercept
+numberTop6 = names(top6)[top6]
+numberTop6
+```
+**features for selection for 'Cause' Classifications also**
+```{r}
+# features for 'Cause'
+fullSearch = regsubsets(Cause ~ .,data = escapesD,method = "exhaustive", nvmax = 12)   # 12predictors
+full = summary(fullSearch)
+top6=full$which[6,-c(1)] # selected variables at top 5(role5) excluding intercept
+causeTop6 = names(top6)[top6]
+causeTop6
+```
+
+```{r}
+escapesD$Cause <- as.factor(escapesD$Cause)  #now converting back to factors so i can use feature in confusion matrix
+```
+
+
+##### Spliting Data
+
+Finally splitting data: for best data science practise and evaluation.
+```{r}
+set.seed(101)
+selected= createDataPartition(escapesD$Cause,p=0.7,list = F) # selected is a boolean of rows selected
+escapesTrain= escapesD[selected,]
+escapesTest = escapesD[-selected,]
+dim(escapesD)
+dim(escapesTrain)
+dim(escapesTest)
+```
+
+
+### EXPERMENTS
+
+#### 1. CLASSIFICATION
+
+##### Model1 Logistic Regression
+
+**The Model Selection and Turning Justification**
+
+1. best performance was seen using selected features in earlier feature selection section above.
+2. There was no need to change the threshold from 0.5 because best accuracy was achieved at 0.5
+
+Modeling using Caret package
+```{r}
+# using Caret to train and test
+model1 <- train(Cause~Season.Winter+Species.Other+Number+Cu+N+P,data=escapesTrain,method = "glm",family = "binomial")
+```
+
+
+**The Model1 Evaluation**
+```{r}
+probs = predict(model1, escapesTest, type = "raw")   # the models way of viewing the data with probability
+#predictedmodel1 = as.factor(ifelse(probs$`1`<0.5,0,1)) # a col assigning below 0.5 as Human
+confusionMatrix(probs,as.factor(as.numeric(escapesTest$Cause)-1),mode="everything",positive ="0") 
+```
+
+
+##### Model2 Random Forest
+
+**The Model Selection and Turning Justification**
+
+1. I selected Random forest for classification here because it is easier to interpret as oppose to svm more so because this model will be deployed to end users.
+2. for Validation parameter  bootstrap's out of bag for recommended for Random  forest
+Setting Validation Parameter
+3. The tuningGrid also recommends 5 variables but by printing the variable importance I notice predictor selected in this order Number,Cu,Age,N,P,Org,SLR (categorical variables ranked low)
+4. Performance dropped when I imposed previously recommended variables in model1
+5. setting seed so process is reproducible
+6. number of Trees and node: I was able to optimize at 250 trees only and maxnodes of 20
+7. I noted that the model performed less when I selected only the top6 important variable model recommended so i reverted to training with all the features again(possibly overfitting)
+```{r}
+trcont_oob <- trainControl(method = "oob")   # bootstrap's out of bag for recommended for Random  forest
+```
+
+```{r}
+set.seed(101)
+model2 <- train(Cause~., data=escapesTrain,method="rf", trControl = trcont_oob,maxnodes=20,ntree=250,tuneGrid = expand.grid(mtry=c(3:9)))
+# got better performance by using the top5 variables rather than using all
+print(model2)
+varImp(model2)
+```
+**The Model2 Evaluation**
+```{r}
+pred = predict(model2,escapesTest)
+confusionMatrix(pred,as.factor(as.numeric(escapesTest$Cause)-1), mode= "everything",positive = "0")
+paste('number difference in two models predictions is: ',sum(!(pred==probs)))
+```
+
+##### Experiment 1 Discussion
+
+* The two models coincidentally performed the similarly generally (notice the F1 scores) though they predicted 8 instances differently
+* Interestingly the performance of model1 did reduced when I used the variables selected by by model2 the random forest.
+* Finally though Model2(Random Forest) is More flexible for more additional features but I would recommend Model1(Logistic Regression) more because it is less computationally demanding and Model1 performed a little better than model2 in this case.
+
+
+#### 2. REGRESSION  
+
+##### Model3 Linear Regression
+
+*The Model Selection and Turning Justification*
+
+1. **preprocessing:BOXCOX transformation**
+As observed above the target and most of the features are not normally distributed, this will be an issue for any Linear Regression model, to resolve this challenge I will be transform the target to get a more normal distribution and using this transformed target to create my linear model in "Linear Regression Experiment 2"
+2. Performance did increased, when using all the features(overfitting) but when tested with testset it reduced so I maintained the 6 features earlier recommended for Target "Number" using leap package which performed better with the test set
+3. the Transformation did not improve my model in this instance
+
+**the Transformation of the training set with BoxCox**
+```{r}
+
+bc = boxcox(lm(escapesTrain$Number~1))  # the target Number against a constant
+# we can estimate the power q is about 0.2 from the plot below but I will get the exact value with lines below
+
+q = bc$x[which.max(bc$y)]
+paste("the value actually is ",q)
+```
+
+```{r fig.height=2, fig.width=2}
+TescapesTrain <- escapesTrain # creating New Trainset copy to append transformed Features
+TescapesTrain$t.number = (TescapesTrain$Number^q - 1)/q #saving transformed Target to the dataframe
+ggplot(data= TescapesTrain, aes(x=t.number)) + geom_histogram()
+# function to reverse transformation
+reverseTrans = function(z){ return ( (q*z + 1)^(1/q)  )}
+```
+"Season.Winter" "Cause"         "SLR"           "Zn"            "P"             "Org"  
+
+
+```{r}
+model3 = lm(Number~Season.Winter+Cause+SLR+Zn+P+Org,data = escapesTrain)
+#summary(model3)
+```
+**The Model3 Evaluation**
+```{r}
+pred = predict(model3, escapesTest)
+postResample(pred, escapesTest$Number)
+```
+
+```{r}
+# examine the residuals
+plot(model3, which = c(1,2))
+```
+
+ the *residual plots* shows the linear Regression Model is still not adequate as a Pattern is seen and the QQ plot too
+
+##### Model4 Regression with Random Forest
+
+Can the random forest for Regression model over come the challenge of distributions not being normal and can performance also improve.
+
+*The Model Selection and Turning Justification*
+
+1. To reduce over fitting Out of Bag validation is used during the train
+2. Here, by limiting the Features to the 6 recommended earlier. the model performed better
+3. mtry analysis of the model reveals that Only two features were eventually used
+4. pca preprocessing did not improve performace too
+
+```{r}
+set.seed(123)
+prep = c("range","pca")
+model4 <- train(Number~Season.Winter+Cause+SLR+Zn+P+Org,data = escapesTrain,method = "rf",metric = "RMSE",trControl = trcont_oob) #The number of features in the candidate set at each node (mtry) 
+print(model4)
+```
+
+*The Model4 Evaluation*
+```{r}
+pred = predict(model4, escapesTest)
+postResample(pred, escapesTest$Number)
+```
+```{r}
+varImp(model4)
+```
+
+
+```{r}
+# examine the residuals
+plot(model4, which = c(1,2))
+escapesTest$pred <- pred
+ggplot() + geom_point(data=escapesTest, aes(x=SLR,y=Number),color='blue') + geom_smooth(data=escapesTest, aes(x=SLR,y=pred),color='red')
+
+```
+model4 is the red line
+
+##### Experiment 2 Discussion
+
+* Model4(Random Forest for Regression) performed better than Model3 (the standard linear Regression model)
+* feature 'SLR' features seems like the most important numerical variable.
+* A form of multi-polynomial Model may fit better as seen above
+
+
+#### 3. MODEL DEPLOYMENT
+As recommended from experiment1; I would be selecting the Logistic regression Model1
+and saving it to an rds file
+
+```{r}
+saveRDS(model1,"model.rds")
+```
+
+In the attached shiny app, I will continue the deployment.
+
+
+
+
+
+

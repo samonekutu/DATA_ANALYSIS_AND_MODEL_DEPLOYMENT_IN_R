@@ -1,0 +1,690 @@
+---
+title: 'CMM535 Coursework PART 1 '
+author: "SAMUEL ONEKUTU 2114194, School of Computing, Robert Gordon University Aberdeen"
+date: "3/11/2022"
+output:
+  html_document:
+    theme: cerulean
+  pdf_document: default
+  word_document: default
+fig_width: 3
+fig_height: 3
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+#### Data Preparation, Exploration with Machine Learning in R
+#### using two data set 'escapes.csv':records of fish escapes and 'analysis.csv': the water analysis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+##### Importing CSV Files
+Importing the two data sets from my local directory.
+
+```{r}
+#getwd()                                              # show current directory
+escapes_ori <- read.csv("escapes.csv",header = T,stringsAsFactors = T)
+analysis_ori <- read.csv("analysis.csv",header = T,stringsAsFactors = T)  # original data import, setting string values as factors for evaluation
+
+```
+
+##### Importing the neccessary libraries
+
+*rlang* for base type core R features.
+*caret* for preprocessing,
+classification and Regression training 
+*ggplot2* for visualizations,
+*dplyr* data manipulation,
+*Hmisc* other functions ,
+*stringr* for strings and characters operations,
+*corrplot* for correlation grid plot ,
+*randomForest* for random forest classifier.
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library (rlang)
+library (caret)
+library (ggplot2)
+library (dplyr)
+library (Hmisc)
+library (stringr)
+library(corrplot)
+library(randomForest)
+```
+
+### 1. Data Preparations
+
+I would begin by reviewing and cleaning the columns/features of interest and
+identifying other related and relevant features based on the problem question. then
+I would remove duplicate/irrelevant columns and then deal with Missing values. my work on the individual features will involving looking out for: \* typo and difference in spellings \*
+difference in units of measurement \* incorrect data type and out of
+range value \* missing data and \* transformations starting with the three focus feature and base on domain knowledge generally.
+"Escaped.Species" is cleanest, attention would be directed to the "Age" and "Average.weight" features, also with _"Escaped.Number"_ and the _"Dates"_ would be transformed to help with the merging task
+
+#### 1.1 Preparing my Datasets 'escapes_ori'
+
+Firstly, the column dimensions,column names and summary of the dataset.(kindly refer to appendix for full print of the summary)
+
+```{r}
+dim(escapes_ori)
+```
+
+From result above we have 357 instances and 38 columns. i would begin by exploring the data's summary
+
+```{r}
+names(escapes_ori)
+#summary(escapes_ori) # kindly refer to appendix for full print of the summary
+```
+
+creating a copy of original escapes as "escapes"
+
+```{r}
+escapes<- escapes_ori
+```
+
+##### 1.1.1 Cleaning "Average.Weight" Feature 
+
+The Aim is to have Weight as *Kilograms* and in numeric form. convert
+Average.weight to string so I can make use of _stringr_ library to clean.
+
+but first defining non_alpha-numeric and others variables for cleaning.
+
+```{r}
+non_alpha_num <- " '[!\"#$%&\\()*+-,/:;<=>?@\\^_`{|}~\a\b\t\n\r\v\f] "# i removed"."so it does not affect floats
+non_alpha_num_ <- " '[!\"#$%&\\()*+-,/:;<=>?@.\\^_`{|}~\a\b\t\n\r\v\f] "
+non_num <- paste(c('[',letters, LETTERS, non_alpha_num,']'), collapse="") # defining all string and characters
+non_num_<- paste(c('[',letters, LETTERS, non_alpha_num_,']'), collapse="") #extended non_num adding "." back
+com_letters<-  paste(c('[',letters, LETTERS," ",']'), collapse="")  # only upper and lower case
+```
+
+reviewing the Average.weight feature for cleaning.
+
+```{r}
+escapes$Average.Weight <- as.character(escapes$Average.Weight)
+class(escapes$Average.Weight)
+#print(escapes$Average.Weight)
+```
+
+1. Dealing with range values e.g 1-2kg or 2-5 grams. the code below will detect for "kg" and treat and also for the rest assuming they will be in grams (g).
+
+```{r}
+findmean_kg<- function(strg){
+  if (grepl("-",strg) & grepl("kg",strg)){
+    strg = str_remove_all(strg,com_letters )            # find mean between weight(kg) in ranges(-)
+    minus = str_locate(strg,"-")[1,1];
+    num1 = as.numeric(substr(strg,0,minus-1));
+    num2 = as.numeric(substr(strg,minus+1,nchar(strg))); 
+    return(as.character(mean(c(num1,num2))))                 
+  }
+  else if (grepl("-",strg)){
+    strg = str_remove_all(strg,com_letters )            # assuming all other unit not kg are grams or g
+    minus = str_locate(strg,"-")[1,1];
+    num1 = as.numeric(substr(strg,0,minus-1));
+    num2 = as.numeric(substr(strg,minus+1,nchar(strg))); 
+    return(as.character(mean(c(num1,num2))/1000))        
+  }
+  else 
+    {return(strg)}                                 # return contain unchanged for futher cleaning
+}
+# applying function.
+escapes$Average.Weight <- sapply(escapes$Average.Weight,findmean_kg)
+```
+
+2. I found two instances that Age and Average.weight were swapped, for lack
+of the right code to correct this, I would manually locate the instances
+_76 and 337_ and make switch. also at instance _49_ and _75_.
+
+```{r}
+escapes$Age <- as.character(escapes$Age)  # to allow the make swap with elements of same class character
+
+age_76 <- escapes$Average.Weight[76]
+weight_76 <- escapes$Age[76]
+escapes$Average.Weight[76]<- weight_76
+escapes$Age[76]<-age_76
+
+age_337 <- escapes$Average.Weight[337]
+weight_337 <- escapes$Age[337]
+escapes$Average.Weight[337]<- weight_337
+escapes$Age[337]<-age_337
+# lastly this was detected 
+escapes$Average.Weight[49]<- mean(0.75,2) # originally captured as("750g-2kg")
+escapes$Age[49]<- ("2000") # originally captured as("2000 & 200")
+escapes$Age[75]<- ("2000") # originally captured as("2000 & 200")
+escapes$Escape.ID<-as.factor(escapes$Escape.ID)
+```
+
+3. dealing with the units converting grams to "kg" and return everything as
+numeric
+
+```{r}
+to_kilo <- function(strg){
+  if (grepl("k",strg)){return(as.numeric(str_remove_all(strg,non_num)))} #detect k or kg or kilo 
+  else if (grepl("g",strg)){
+    strg = str_remove_all(strg,non_num)
+    strg = (as.numeric(strg))/1000                        #detect g or grams and convert
+    return(strg)}
+  else {return(as.numeric(str_remove_all(strg,non_num)))}  # convert other and unknowns to NA's           
+}
+
+#applying the function
+escapes$Average.Weight<- sapply(escapes$Average.Weight, to_kilo)
+```
+allowed one erroneous entire was coerced to NA.
+
+```{r}
+summary(escapes$Average.Weight)
+#escapes$Average.Weight
+```
+
+##### 1.1.2 cleaning "Age" Feature
+
+Aim is to have age as *months* and in numeric form.
+
+```{r}
+#print(escapes$Age) 
+```
+
+From review of Age column I found issues for example: 22 unknowns,entries like '2001_s1',
+16 NA's, others like; 14mths, symbols, weeks e.t.c so starting with;
+
+1. converting Age to string so I can apply string functions to it
+
+```{r}
+escapes$Age <- as.character(escapes$Age)
+class(escapes$Age)
+```
+
+2. converting the NA's to characters to enable me run string cleaning methods on entire column later.
+
+```{r}
+escapes$Age<- as.character(escapes$Age)
+escapes$Age[is.na(escapes$Age)]<-"unknown"
+```
+
+3. defining string functions to get the average of values between "-" and "&", findmean1 and
+findmean2 respectively
+
+```{r}
+findmean1<- function(strg){
+  if (grepl("-",strg)){
+    strg = str_remove_all(strg,com_letters )            # remove all other string apart from numbers
+    minus = str_locate(strg,"-")[1,1];
+    num1 = as.numeric(substr(strg,0,minus-1));
+    num2 = as.numeric(substr(strg,minus+1,nchar(strg))); 
+    return(as.character(mean(c(num1,num2))))                 
+  }
+  else {return(strg)}
+}
+
+escapes$Age <- sapply(escapes$Age,findmean1)
+```
+
+```{r}
+findmean2<- function(strg){
+  if (grepl("&",strg)){
+    strg = str_remove_all(strg,com_letters)
+    and = str_locate(strg,"&")[1,1];
+    num1 = as.numeric(substr(strg,0,and-1));
+    num2 = as.numeric(substr(strg,and+1,nchar(strg))); # from start of 2no. to end of string
+    return(as.character(mean(c(num1,num2))))                 
+  }
+  else {return(strg)}
+}
+
+escapes$Age <- sapply(escapes$Age,findmean2)
+```
+
+4. locating age captured as yrs and converting to numeric months
+
+```{r}
+# find yrs and convert to by multiplying by 12
+conv_yrs<- function(age){
+  if(grepl('yrs',age)){yrs=str_remove_all(age,non_num);months= as.numeric(yrs)*12;return(as.character(months))}
+  else{return(age)}
+  }
+escapes$Age<- sapply(escapes$Age,conv_yrs)
+```
+
+5. locating age captured as weeks and converting to numeric months.
+
+```{r}
+# find weeks or wks and convert to by dividing by 4
+conv_wks<- function(age){
+  if(grepl("weeks",age)){wks=str_remove_all(age,non_num);months= as.numeric(wks)/4;return(as.character(months))}
+  else if(grepl("wks",age)){wks=str_remove_all(age,non_num);months= as.numeric(wks)/4;return(as.character(months))}
+  else{return(age)}
+  }
+escapes$Age <- sapply(escapes$Age,conv_wks)
+```
+
+6. next I correct Age instance were the age was capture as "17s 0's" as
+17months, assuming this, as it appears normal for fish of this specie
+and weight to have this age.
+
+```{r}
+#correct Age by removing "0's" before proceeding with more cleaning
+rm_0s<- function(age){
+  if(grepl("0's",age)){return(str_remove_all(age,"0's"))}
+  else{return(age)}
+}
+escapes$Age<- sapply(escapes$Age,rm_0s)
+```
+
+7. Reviewing the Age Feature, I have assumed age captured in this form "yyyy s1" for some instances to mean the year the fish hatched and by subtracting it from YEAR of escape we can
+estimate the age at time escape. below is a function to compute
+approximate years of fish e.g age captured as "2000 s1" and escape in
+2002, output should be 2year i.e. 24months.
+
+In the next 3 code blocks, I will define functions I will use together to
+solve this. firstly I would need to compute "Year" a new column from
+"Escape.Start.Date" before operation above.
+
+```{r}
+escapes$Year<- substr(as.Date(escapes$Escape.Start.Date,format="%d-%b-%y"),0,4) # get un-abbreviated year then the first 4 letter representing YYYY 
+```
+
+```{r}
+# 1. function to return months or unknown for all other instance difficult to interpret for now eg"2001 s1/2"
+
+months_of<- function(x){if (x>0){return(as.character(x*12))}else{return("unknown")}}
+#
+
+```
+
+```{r}
+# 2. function that detect "year" input in age return integer years. here escape_id feature is used to point at the instances.
+compute_year<-function(id){
+  hatch_yr= substr(str_remove_all(escapes$Age[escapes$Escape.ID == id],non_num_),0,4) # cleaning the age take first 4  
+  end_yr = escapes$Year[escapes$Escape.ID == id]
+  return (as.integer(end_yr)- as.integer(hatch_yr))  # finding difference
+}
+# compute_year("2000355")  #test
+```
+
+```{r}
+# 3. MAIN FUNCTION a combination functions above.
+year_detector <- function(id){            #assumes any text greater than 4 should be year
+  if(str_length(str_remove_all(escapes$Age[escapes$Escape.ID == id],non_num_))>=4){
+    x = compute_year(id)                      # already defined above
+    return (months_of(x))                     # already defined above
+  }
+  else{return(escapes$Age[escapes$Escape.ID == id])} 
+}
+```
+
+APPLYING the function (*year_detector*) to iterate through id and
+detect year in age feature then *compute* actual age and return answer
+in *months*.
+
+```{r}
+escapes$Age <- sapply(escapes$Escape.ID,year_detector)
+
+```
+
+8. lastly convert entries in Age to numeric and replace few remaining error
+with NA
+
+```{r}
+Age_to_Numbers <- function(age){
+  p <- str_remove_all(age,non_num)
+  if(str_length(p)>0){return (as.numeric(p))}
+  else{ return (NA)}
+}
+escapes$Age <- sapply(escapes$Age, Age_to_Numbers)
+```
+
+convert the 'unknowns' to NA's and everything back to character
+
+```{r}
+escapes$Age[escapes$Age== "unknown"] <- NA
+summary(escapes$Age)
+```
+
+##### 1.1.3 Cleaning of Feature: Final.Number.Escaped
+
+Another feature that appears important is the "Final Number Escaped" which let us know instances where there were escapes(the number escaped) and other instances where there was no escape(0 escapes). Below is a quick cleaning as this feature rather than other similar ones have lest missing value. I would make use of some functions earlier defined and define a few new ones too.
+
+
+```{r}
+#1. change everything character
+escapes$Final.Number.Escaped<-as.character(escapes$Final.Number.Escaped)
+#2. MANUAL CORRECTION OF TWO INSTANCES
+escapes$Final.Number.Escaped[330]<-mean(70000,80000)# instance 330 from "70-80,000" to its expected mean value
+escapes$Final.Number.Escaped[220]<-mean(500,1050)# instance 220 from ">500 <1050" to its expected mean value
+```
+
+```{r}
+#3. ASSUMING THAT ESCAPED NUMBER CAPTURED WITH DEAD MEANS THAT NO ESCAPE OCCURRED
+# also detect word "no" and replace value with zero too
+deadfish<- function(e_num){
+  if(grepl('dead',e_num)|grepl('no',e_num)){return(0)}
+  else{return(e_num)}
+  }
+escapes$Final.Number.Escaped<- sapply(escapes$Final.Number.Escaped,deadfish) #apply the function
+```
+
+```{r}
+#4. FIND AVERAGE BETWEEN VALUES SEPERATED BY"-" DEFINED EARILER
+escapes$Final.Number.Escaped<- sapply(escapes$Final.Number.Escaped,findmean1)
+```
+```{r}
+#function to remove non_numeric
+str_remove<-function(str){return(str_remove_all(str,non_num_))} 
+```
+```{r}
+#5.changing "unknown" to NA
+escapes$Final.Number.Escaped[escapes$Final.Number.Escaped== "unknown"] <- NA 
+#6. any remaining "none" to 0
+escapes$Final.Number.Escaped[escapes$Final.Number.Escaped== "none"] <- 0  
+#7. using function defined above to removing all string so it can all be changed to numericals
+escapes$Final.Number.Escaped<-sapply(escapes$Final.Number.Escaped,str_remove) 
+escapes$Final.Number.Escaped<-as.numeric(escapes$Final.Number.Escaped) 
+#8. replacing the 9 NA's with random values because we cant assume there were no escapes
+escapes$Final.Number.Escaped<-impute((escapes$Final.Number.Escaped),"random")
+```
+
+##### 1.1.4 Removing Irrelvant Features and Instance
+
+from review of the data the other relevant feature are clean but not all
+are necessary in the merged and final dataset.
+
+```{r}
+#create copy "escapes_fin"
+escapes_fin <- escapes
+```
+
+selecting and removing duplicate features eg multiple dates and site
+address, columns such as "Final.Number.Recovered", "Health.Surveillance" was removed because of the many missing values it contains and not too relevant.
+"Final.Number.Escaped" was preserved along with "Escape.Reason" because of the insight into the problem they provide and others such as "Escape.Start.Date" and "Site.Name" were preserved as they appear in some form in the _analysis_ dataset.
+"Initial.Number.Escaped" was remove because it is over correlated with "Final.Number.Escaped".
+```{r}
+# changing few NA's to string form "unknown"; 
+# this is useful to allow the learning Algorithm to run fully without stopping because of NA values it finds.
+escapes_fin$Final.Escape.Reason<-as.character(escapes_fin$Final.Escape.Reason)
+escapes_fin$Final.Escape.Reason[is.na(escapes_fin$Final.Escape.Reason)]<- "unknown" 
+```
+Selection of Features in _escapes fin_ dataset.
+```{r}
+# selecting features
+relevant<- c("Escape.ID","Escape.Water.Type","Escape.Start.Date","Escaped.Species","Stage","Age","Average.Weight","Final.Escape.Reason","Final.Number.Escaped","Marine.Scotland.Site.ID","Site.Name","Operator","Producing.in.Last.3.Years","Species","Year")
+for(col in colnames(escapes_fin)){
+  if (!( col %in% relevant)){escapes_fin[col] <- NULL}}
+dim(escapes_fin) 
+#sum(is.na(escapes$Final.Number.Recovered))
+```
+##### 1.1.5 Creating new Feature "Date" for easy of merging
+Lastly for this dataset, I will create a new column from "Escape.Start.date" containing year and month that will help with the merging task. This particular date column "Escape.Start.date" was selected because there were no missing entries needing cleaning.
+```{r}
+#sum(is.na(escapes_fin$Escape.Start.Date)) # to confirm no NAs
+# creating a new feature "Date" with month and year in format "yyyy-mm"
+year_mo<-function(date){return(substr(as.Date(date,format="%d-%b-%y"),0,7) )}
+escapes_fin$Date <- sapply(escapes_fin$Escape.Start.Date,year_mo)
+head(escapes_fin$Date,2)
+```
+
+#### 1.2 Preparing My Datasets 'analysis.csv'
+
+In this dataset I would not be removing any features, however I would be create a new feature "date" to help with the merging task. I will also lower the case of the Site.Names
+
+```{r}
+#summary(analysis_ori) # kindly refer to appendix for full print of the summary
+#create copy
+analysis<-analysis_ori
+colnames(analysis)
+```
+
+1. Merging Year and Month to get desire format "yyyy-mm".
+
+```{r}
+# 1st convert to string so I can apply string manipulations
+analysis$year<-as.character(analysis$year)
+analysis$month<-as.character(analysis$month) 
+# i would concatenate "0" in front of the months instances with single digits so the final output is right. e.g instead of "1" we have "01" as January.
+str_mo<- function(x){if (str_length(x)<2){return(str_c('0',as.character(x)))}else{return(as.character(x))}}
+analysis$month<- sapply(analysis$month,str_mo)
+```
+
+```{r}
+analysis$Date <-(str_c(analysis$year,analysis$month,sep ="-")) #joining the two columns
+head(analysis$Date,2)
+```
+2. Converting "Site.Name" to lower cases to allow them match sitename in _escapes_ dataset
+```{r}
+# using function in stringr package
+analysis$Site.Name<-as.factor(str_to_lower(analysis$Site.Name))
+```
+
+### 2. DATA Merging
+
+#### 2.1 Reviewing Features that Match in Both Data sets.
+
+1. Reviewing the two data sets, we can find the *Date* features in common,
+also the *Site.Name*.
+
+```{r}
+print("Name of columns for Escapes :")
+print(colnames(escapes_fin))
+print("Name of columns for Analysis: ")
+print(colnames(analysis))
+```
+
+
+2 The MERGER.
+I would be merging the datasets by "SiteName" but also using "Date" which is now in both datasets in format(yyyy-mm). because merging with SiteName alone would not be precise enough if we do not  link the period of *escape* with the period the *analysis* was collected (year and month at least) for every particular lake site.
+
+```{r}
+# merging the two dataframes by the two columns "Date" and "Site.Name"
+
+escapesPlus<- merge(x=escapes_fin,y=analysis,by.x =c("Date","Site.Name"),by.y =c("Date","Site.Name"))
+dim(escapesPlus)
+```
+
+#### 2.2 Dealing With Missing Date
+
+A final review of my dataset shows that; in fact some of the missing values in Age and Average weight were because there was no escapes on those instances in the first place. Assuming that there maybe a relationship between Age ,weight and number of escaped fish. I decided that rather than deleting these instances. I would:
+
+*1. Replacing NA's* 
+also instead of assigning all the NA's to be the general mean of the column or random numbers, it would be better to  replace NA with average age or wieght of other fish that did not escapeAge like a group average. see below.
+
+```{r}
+# for AGE 
+mean_age0<-mean(escapesPlus$Age[escapesPlus$Final.Number.Escaped==0],na.rm=T)# calculating the mean Age of fish where escape number is 0 ie no escapes.
+# assigning this average to the NA in Age were this two conditions are meet: Age is missing and escape number is 0 
+escapesPlus$Age[is.na(escapesPlus$Age)&(escapesPlus$Final.Number.Escaped==0)]<-mean_age0
+print(mean_age0)
+```
+
+```{r}
+#for Average.Weight
+mean_weight0<-mean(escapesPlus$Average.Weight[escapesPlus$Final.Number.Escaped==0],na.rm=T)# calculating the mean weight where escape number is 0
+mean_weight0
+# assigning this average to the average.weight were weight is missing and escape number is 0 
+escapesPlus$Age[is.na(escapesPlus$Average.Weight)&(escapesPlus$Final.Number.Escaped==0)]<-mean_weight0
+```
+*2. replacing NA's remaining* with the general means
+```{r}
+# assigning general mean to rest of NA's
+escapesPlus$Age <- as.numeric(impute((escapesPlus$Age), mean)) #for Age, note that i cast the class of the feature back to numeric to correct it from "impute" type
+escapesPlus$Average.Weight <- as.numeric(impute((escapesPlus$Average.Weight), mean)) #for average weight
+print(mean(escapesPlus$Age))
+print(mean(escapesPlus$Average.Weight))
+```
+with further mastery, I am sure would have be able to apply a machine learning Algorithm that can efficiently handle this NA's 
+
+##### 2.3 saving the csv file 
+
+saving the file to local working directory and previewing _escapesPlus_ ready for learning.
+
+```{r}
+colnames(escapesPlus)
+#summary(escapesPlus) 
+write.csv(escapesPlus,"escapesPlus.csv",row.names = FALSE)
+```
+
+### 3. Statistical Exploration, Visualizations and Discussion
+
+From our understanding of the business problem centering around the escaping of fish I would began by exploring specific features and gradually expand to the entire dataset.
+
+```{r}
+#summary(escapesPlus) # kindly refer to appendix for full print of the summary
+```
+
+I will first review the frequency of escapes and which specie has most incidence.
+
+```{r}
+## using ggplot
+ggplot(escapesPlus,aes(y=reorder(Escaped.Species,Escaped.Species,function(x)+length(x)))) + geom_bar()+labs(title= "fig 1. ESCAPED SPECIES COUNT")
+# reordered bar plot: code from: https://stackoverflow.com/questions/5208679/order-bars-in-ggplot2-bar-graph
+```
+
+```{r}
+# SALMON PRODUCER COUNT
+total_operation <- length(escapesPlus$Operator)
+sal<- 0 # accumulator variable to count atlantic salmon producers
+RB_t<- 0 # accumulator variable to count rainbow trout producers
+for(species in escapesPlus$Species){if(grepl("atlantic salmon",species)){sal=sal+1}
+}
+for(species in escapesPlus$Species){if(grepl("rainbow trout",species)){RB_t=RB_t+1}
+}
+print(paste("Total number of Operation captured in dataset is ",total_operation ))
+print(paste("Total number of Atlantic salmon producer are :",sal ))
+print(paste("also total number of rainbow trout producer:",RB_t ))
+non_salmon<- total_operation-sal
+```
+
+```{r}
+# plotting Ratio of salmon production from total production
+pie(c(sal,non_salmon),labels = c(paste("Atlantic Salmon production:",sal/total_operation*100,"%"),"non Salmon production" ),col=c("grey","skyblue"),main="fig 2. RATIO OF ATLANTIC SALMON IN TOTAL PRODUCTION")
+```
+
+The bar chart in fig 1. shows that most incidence happen to be the Atlantic Salmon, followed by the Rainbow Trout species before the other species. Further exploration and generation of the pie chart    fig 2. above shows that the Atlantic Salmon is very popular with the Scottish fish farmer/producers and perhaps more economically viable hence the activity. Therefore focus maybe place on this specie and on the conditions that are leading to their escapes.
+
+For a more general look at the data I would plot a correlation table also for any relationship and patterns between the numeric variables
+
+CORRELATION PLOT to conduct a visualization of the general _escapePlus_ dataset. 
+
+```{r}
+numericals<-c() # to collect the features that class numeric so i can plot the correlations of this numerical values
+for(feat in colnames(escapesPlus)){
+  if (class(escapesPlus[feat][1,])=="numeric"){numericals<-c(numericals,feat)} # 1st fetching the numeric variables.
+}
+corrplot(cor(escapesPlus[,numericals],use="complete.obs"),method = "number",main="fig 3. Correlation Plot for Numerical features") # use set to complete.obs to accommodate the NA's in the set
+```
+
+the correlation plot above explains that there maybe some correlation between the water analysis features too.
+
+
+### 4. Explorations with Random Forest Classifier Algorithm and Discussion.
+#### 4.1 Preparing the data.
+In order to learn, the data must have a class based target feature as the random forest is a supervised classifier.
+therefore I would transform my _Final.Number.Escaped_ to a binary state of _0 meaning "no escape"_ and _1 meaning escaped_.
+using threshold to value of >0, this will be saved in a new column "Bin_Escape"
+```{r}
+binarizer<- function(num){if(num>0){return (1)}else {return (0)}}
+escapesPlus$Bin_Escape<- sapply(escapesPlus$Final.Number.Escaped,binarizer)
+escapesPlus$Bin_Escape<- as.factor(escapesPlus$Bin_Escape)
+#write.csv(escapesPlus,"escapesPlus.csv",row.names = FALSE) # update csv file
+```
+
+
+
+#### 4.2 The Model
+
+I would be focusing on the numeric variables for this modeling stage to simplify the complexity of the model.
+
+```{r}
+# defining the train test controls as Out_of_Bag for bootstrap
+trcont_oob <- trainControl(method = "oob") # oob for Out of Bag 
+```
+I selected out of bag, though the performance wasn't significantly better than with cross validation training control.
+
+```{r}
+set.seed(1234)  # set set to allow experiment be reproducible everytime
+rf_model <- train(Bin_Escape~.,data=escapesPlus[c(numericals[-3],"Bin_Escape")],method="rf",metric="Accuracy",trControl = trcont_oob,maxnodes=11,ntree=300) # number of trees are limited to 300 and nodes to maximum of 5, lastly remove "Final.Number.Escaped" which is also another form of our target
+print(rf_model)
+#the forest optimize at maxnode = 11,
+#number of trees remained fixed to 300 to reduce run time
+#forest was trained only on numeric features of the dataset. I would investigate further to see how #non-numeric features can be used in forest at a later time.
+```
+
+#### 4.2.1 Main Results Discussion
+Displaying the Variable Importance:
+```{r}
+varImp(rf_model)
+```
+
+ As printed above in the variable importance ranking of the Model; *Age, Average weight* and the water analysis component measured as *c6* are the three most important variables. This mean that our forest model has "Age" being the most important variable; at the root the model before branching off and considering "Average.weight" and then to "c6" before the other numerical features.
+
+
+
+#### 4.2.2 An extra exploratory look at Altantic Salmon instances only
+
+```{r}
+# CREATING NEW DATAFRAME WITH ONLY ATLANTIC SALMONS
+Escaped_Salmons <- escapesPlus%>%filter(Escaped.Species=="atlantic salmon")
+#summary(Escaped_Salmons)
+dim(Escaped_Salmons)
+```
+LEARNING
+applying same random forest and evaluating output model
+```{r}
+set.seed(1234)  # set set to allow experiment be reproducible everytime
+rf_S_model <- train(Bin_Escape~.,data=Escaped_Salmons[c(numericals[-3],"Bin_Escape")],method="rf",metric="Accuracy",trControl = trcont_oob,maxnodes=14,ntree=300) 
+print(rf_S_model)
+```
+```{r}
+varImp(rf_S_model)
+```
+DISCUSSION
+I have observed with this analysis that "Age" is still the most important feature but instead of having "Average.Weight" as the second most important feature, water analysis component measured as *c6* show more Importance than the Average Weight and component c5 has also moved up the in the ranking. worth mentioning though that the accuracy of the Salmon model dropped by about 5%.
+see summary of both results in table 1 below.
+
+          *TABLE 1.*
+  *variable Importance Ranking*
+
+*Rank*|*General Analysis* (accuracy 0.68)|*Atlantic Salmon class* (accuracy 0.63)
+:-----|:---------------------------------|:--------
+1st   |Age                               |Age
+2nd   |Average.Weight                    |c6
+3rd   |c6                                |Average.Weight
+4th   |c7                                |c5
+
+### Conclusion
+ This work involved the use of R to clean two data sets,to merge the datasets and then the selection of  _Final.Number.Escaped_ as target feature and performing of exploratory analysis in which I was able to show:
+ 
+  1. The relationship/correlation between variables.
+  2. The dominance of a certain class (Atlantic Salmon) in the dataset.
+  3. after performing classification using random forest, I was able to show the variable importance ranking for numerical features in the dataset.
+  4. and classifying only the class with the Atlantic Salmon I was able to find a variation in the variable importance ranking for this class and showed the difference from that of the general dataset.
+  
+
+Further exploration by including non numeric features to the my Random Forest models e.g "dates" or "site.name" may reveal more information.
+
+
+
+## APPENDIX
+
+Display of summary of data sets
+
+ ORIGINAL ESCAPES
+```{r}
+summary(escapes_ori)
+```
+ORIGINAL ANALYSIS
+```{r}
+summary(analysis_ori)
+```
+CLEANED ESCAPESPLUS
+```{r}
+summary(escapesPlus)
+```
+
+
+
+
+
+
+
+
+
+
+
